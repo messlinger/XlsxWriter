@@ -98,6 +98,16 @@ class XMLwriter(object):
 
         data = self._escape_data(data)
         self.fh.write("<%s>%s</%s>" % (tag, data, end_tag))
+        
+    def _xml_data_element_unencoded(self, tag, data, attributes=[]):
+        # Write an XML element containing data with optional attributes.
+        # Attributes and data are NOT encoded.
+        end_tag = tag
+
+        for key, value in attributes:
+            tag += ' %s="%s"' % (key, value)
+
+        self.fh.write("<%s>%s</%s>" % (tag, data, end_tag))
 
     def _xml_string_element(self, index, attributes=[]):
         # Optimized tag writer for <c> cell string elements in the inner loop.

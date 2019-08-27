@@ -132,7 +132,12 @@ class Comments(xmlwriter.XMLwriter):
         self._xml_start_tag('comment', attributes)
 
         # Write the text element.
-        self._write_text(text, font)
+        if re.search('^<r>', text) and re.search('</r>$', text):
+            # Pre-formatted rich strings are written unencoded,
+            # comment font options are ignored
+            self._xml_data_element_unencoded('text', text)            
+        else:
+            self._write_text(text, font)
 
         self._xml_end_tag('comment')
 

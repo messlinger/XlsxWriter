@@ -957,7 +957,7 @@ class Worksheet(xmlwriter.XMLwriter):
         Returns:
             0:  Success.
             -1: Row or column is out of worksheet bounds.
-            -2: String truncated to 32k characters.
+            -2: Resulting formatted string is longer than 32k characters.
             -3: 2 consecutive formats used.
             -4: Empty string used.
             -5: Insufficient parameters.
@@ -971,7 +971,6 @@ class Worksheet(xmlwriter.XMLwriter):
 
         tokens = list(args)
         cell_format = None
-        str_length = 0
         string_index = 0
 
         # Check that row and col are valid and store max and min values
@@ -982,6 +981,32 @@ class Worksheet(xmlwriter.XMLwriter):
         if isinstance(tokens[-1], Format):
             cell_format = tokens.pop()
 
+        # Create the formatted xml-string from the format,text token pairs.
+        error, string = self._create_rich_string(tokens)
+        if error: 
+            return error
+
+        # Write a shared string or an in-line string in constant_memory mode.
+        if not self.constant_memory:
+            string_index = self.str_table._get_shared_string_index(string)
+        else:
+            string_index = string
+
+        # Write previous row if in in-line string constant_memory mode.
+        if self.constant_memory and row > self.previous_row:
+            self._write_single_row(row)
+
+        # Store the cell data in the worksheet data table.
+        self.table[row][col] = cell_string_tuple(string_index, cell_format)
+
+        return 0
+    
+    
+    # Create a 'rich' string from a given token list. This function has been
+    # outfactored from method _write_rich_string() to be re-usable in 
+    # write_rich_comment()
+    def _create_rich_string(self, tokens):
+    
         # Create a temp XMLWriter object and use it to write the rich string
         # XML to a string.
         fh = StringIO()
@@ -997,11 +1022,12 @@ class Worksheet(xmlwriter.XMLwriter):
         fragments = []
         previous = 'format'
         pos = 0
+        str_length = 0
 
         if len(tokens) <= 2:
             warn("You must specify more then 2 format/fragments for rich "
                  "strings. Ignoring input in write_rich_string().")
-            return -5
+            return -5, None
 
         for token in tokens:
             if not isinstance(token, Format):
@@ -1017,7 +1043,7 @@ class Worksheet(xmlwriter.XMLwriter):
                 if token == '':
                     warn("Excel doesn't allow empty strings in rich strings. "
                          "Ignoring input in write_rich_string().")
-                    return -4
+                    return -4, None
 
                 # Keep track of actual string str_length.
                 str_length += len(token)
@@ -1027,7 +1053,7 @@ class Worksheet(xmlwriter.XMLwriter):
                 if previous == 'format' and pos > 0:
                     warn("Excel doesn't allow 2 consecutive formats in rich "
                          "strings. Ignoring input in write_rich_string().")
-                    return -3
+                    return -3, None
 
                 # Token is a format object. Add it to the fragment list.
                 fragments.append(token)
@@ -1060,23 +1086,11 @@ class Worksheet(xmlwriter.XMLwriter):
 
         # Check that the string is < 32767 chars.
         if str_length > self.xls_strmax:
-            return -2
-
-        # Write a shared string or an in-line string in constant_memory mode.
-        if not self.constant_memory:
-            string_index = self.str_table._get_shared_string_index(string)
-        else:
-            string_index = string
-
-        # Write previous row if in in-line string constant_memory mode.
-        if self.constant_memory and row > self.previous_row:
-            self._write_single_row(row)
-
-        # Store the cell data in the worksheet data table.
-        self.table[row][col] = cell_string_tuple(string_index, cell_format)
-
-        return 0
-
+            return -2, None
+        
+        return 0, string
+        
+        
     @convert_cell_args
     def write_row(self, row, col, data, cell_format=None):
         """
@@ -1292,6 +1306,41 @@ class Worksheet(xmlwriter.XMLwriter):
 
         # Store the options of the cell comment, to process on file close.
         self.comments[row][col] = [row, col, comment, options]
+
+    @convert_cell_args
+    def write_rich_comment(self, row, col, *args):
+        """
+        Write a "rich" comment with multiple formats to a worksheet cell.
+
+        Args:
+            row:          The cell row (zero indexed).
+            col:          The cell column (zero indexed).
+            string_parts: String and format pairs.
+            options:      Comment formatting options.
+
+        Returns:
+            0:  Success.
+            -1: Row or column is out of worksheet bounds.
+            -2: Resulting formatted string is longer than 32k characters.
+            -3: 2 consecutive formats used.
+            -4: Empty string used.
+            -5: Insufficient parameters.
+
+        """
+        tokens = list(args)
+
+        # If the last arg is a dictionary we use it as the comment options.
+        if isinstance(tokens[-1], dict):
+            options = tokens.pop()
+        else:
+            options = {}
+
+        error, string = self._create_rich_string(tokens)
+        if error:
+            return error
+
+        self.write_comment( row, col, string, options )
+
 
     def show_comments(self):
         """
